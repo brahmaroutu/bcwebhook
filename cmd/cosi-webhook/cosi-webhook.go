@@ -1,22 +1,22 @@
 package main
 
 import (
-	"crypto/sha256"
+//	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"strings"
+//	"strings"
 
-	"github.com/ghodss/yaml"
+//	"github.com/ghodss/yaml"
 	"github.com/golang/glog"
 	"k8s.io/api/admission/v1beta1"
-	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1"
+//	admissionregistrationv1beta1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
-	"k8s.io/kubernetes/pkg/apis/core/v1"
+//	"k8s.io/kubernetes/pkg/apis/core/v1"
 )
 
 var (
@@ -33,10 +33,6 @@ var ignoredNamespaces = []string{
 	metav1.NamespacePublic,
 }
 
-const (
-	admissionWebhookAnnotationInjectKey = "sidecar-injector-webhook.morven.me/inject"
-	admissionWebhookAnnotationStatusKey = "sidecar-injector-webhook.morven.me/status"
-)
 
 type WebhookServer struct {
 	server        *http.Server
@@ -57,7 +53,7 @@ type patchOperation struct {
 }
 
 
-// Check whether the target resoured need to be mutated
+// Check whether the target resource need to be mutated
 func mutationRequired(ignoredList []string, metadata *metav1.ObjectMeta) bool {
 	// skip special kubernete system namespaces
 	for _, namespace := range ignoredList {
@@ -70,6 +66,29 @@ func mutationRequired(ignoredList []string, metadata *metav1.ObjectMeta) bool {
 	return true
 }
 
+func updateAnnotation(target map[string]string, added map[string]string) (patch []patchOperation) {
+        for key, value := range added {
+                if target == nil || target[key] == "" {
+                        target = map[string]string{}
+                        patch = append(patch, patchOperation{
+                                Op:   "add",
+                                Path: "/metadata/annotations",
+                                Value: map[string]string{
+                                        key: value,
+                                },
+                        })
+                } else {
+                        patch = append(patch, patchOperation{
+                                Op:    "replace",
+                                Path:  "/metadata/annotations/" + key,
+                                Value: value,
+                        })
+                }
+        }
+        return patch
+}
+
+
 func createPatch(pod *corev1.Pod, annotations map[string]string) ([]byte, error) {
 	var patch []patchOperation
 
@@ -80,6 +99,7 @@ func createPatch(pod *corev1.Pod, annotations map[string]string) ([]byte, error)
 
 // main mutation process
 func (whsvr *WebhookServer) mutate(ar *v1beta1.AdmissionReview) *v1beta1.AdmissionResponse {
+        fmt.Println("In mutate", ar)
 	req := ar.Request
 	var pod corev1.Pod
 	if err := json.Unmarshal(req.Object.Raw, &pod); err != nil {
@@ -103,7 +123,7 @@ func (whsvr *WebhookServer) mutate(ar *v1beta1.AdmissionReview) *v1beta1.Admissi
 	}
 
 	annotations := map[string]string{admissionWebhookAnnotationStatusKey: "injected"}
-	patchBytes, err := createPatch(&pod, whsvr.sidecarConfig, annotations)
+	patchBytes, err := createPatch(&pod, annotations)
 	if err != nil {
 		return &v1beta1.AdmissionResponse{
 			Result: &metav1.Status{
@@ -125,6 +145,7 @@ func (whsvr *WebhookServer) mutate(ar *v1beta1.AdmissionReview) *v1beta1.Admissi
 
 // Serve method for webhook server
 func (whsvr *WebhookServer) serve(w http.ResponseWriter, r *http.Request) {
+        fmt.Println("In serve", r)
 	var body []byte
 	if r.Body != nil {
 		if data, err := ioutil.ReadAll(r.Body); err == nil {

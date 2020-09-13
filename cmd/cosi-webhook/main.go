@@ -17,37 +17,45 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"crypto/tls"
-	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/http"
+        "os"
+        "os/signal"
+        "syscall"
 
-	v1 "k8s.io/api/admission/v1"
-	"k8s.io/api/admission/v1beta1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/klog/v2"
+        "github.com/golang/glog"
+
 	// TODO: try this library to see if it generates correct json patch
 	// https://github.com/mattbaird/jsonpatch
 )
 
 func main() {
 	// webhooks must have server certs
-	CertFile := "/cert/webhook.crt"
-	KeyFile := "/cert/webhook-key.crt"
+	CertFile := "/etc/webhook/certs/cert.pem"
+	KeyFile :=  "/etc/webhook/certs/key.pem"
 	sCert, err := tls.LoadX509KeyPair(CertFile, KeyFile)
 	if err != nil {
-		klog.Fatal(err)
+		glog.Fatal(err)
 	}
 	tlsconfig := &tls.Config{
 		Certificates: []tls.Certificate{sCert},
 	}
+
+        whsvr := &WebhookServer{
+                server: &http.Server{
+                        Addr:      ":8443",
+                        TLSConfig:  tlsconfig,
+                },
+        }
 
 
         mux := http.NewServeMux()
         mux.HandleFunc("/mutate", whsvr.serve)
         whsvr.server.Handler = mux
 
+        fmt.Println("Ready to Server")
         // start webhook server in new rountine
         go func() {
                 if err := whsvr.server.ListenAndServeTLS("", ""); err != nil {
