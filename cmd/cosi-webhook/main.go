@@ -21,12 +21,11 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
-        "os"
-        "os/signal"
-        "syscall"
+	"os"
+	"os/signal"
+	"syscall"
 
-        "github.com/golang/glog"
-
+	"github.com/golang/glog"
 	// TODO: try this library to see if it generates correct json patch
 	// https://github.com/mattbaird/jsonpatch
 )
@@ -34,7 +33,7 @@ import (
 func main() {
 	// webhooks must have server certs
 	CertFile := "/etc/webhook/certs/cert.pem"
-	KeyFile :=  "/etc/webhook/certs/key.pem"
+	KeyFile := "/etc/webhook/certs/key.pem"
 	sCert, err := tls.LoadX509KeyPair(CertFile, KeyFile)
 	if err != nil {
 		glog.Fatal(err)
@@ -43,32 +42,31 @@ func main() {
 		Certificates: []tls.Certificate{sCert},
 	}
 
-        whsvr := &WebhookServer{
-                server: &http.Server{
-                        Addr:      ":8443",
-                        TLSConfig:  tlsconfig,
-                },
-        }
+	whsvr := &WebhookServer{
+		server: &http.Server{
+			Addr:      ":8443",
+			TLSConfig: tlsconfig,
+		},
+	}
 
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mutate", whsvr.serve)
+	whsvr.server.Handler = mux
 
-        mux := http.NewServeMux()
-        mux.HandleFunc("/mutate", whsvr.serve)
-        whsvr.server.Handler = mux
+	fmt.Println("Ready to Server")
+	// start webhook server in new rountine
+	go func() {
+		if err := whsvr.server.ListenAndServeTLS("", ""); err != nil {
+			glog.Errorf("Failed to listen and serve webhook server: %v", err)
+		}
+	}()
 
-        fmt.Println("Ready to Server")
-        // start webhook server in new rountine
-        go func() {
-                if err := whsvr.server.ListenAndServeTLS("", ""); err != nil {
-                        glog.Errorf("Failed to listen and serve webhook server: %v", err)
-                }
-        }()
+	// listening OS shutdown singal
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+	<-signalChan
 
-        // listening OS shutdown singal
-        signalChan := make(chan os.Signal, 1)
-        signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-        <-signalChan
-
-        glog.Infof("Got OS shutdown signal, shutting down webhook server gracefully...")
-        whsvr.server.Shutdown(context.Background())
+	glog.Infof("Got OS shutdown signal, shutting down webhook server gracefully...")
+	whsvr.server.Shutdown(context.Background())
 
 }
